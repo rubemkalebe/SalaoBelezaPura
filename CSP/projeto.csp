@@ -2,47 +2,63 @@
 
 datatype services = corte | penteado | corte_penteado | manicure | depilacao | massagem | pagamento
 
+power_servicos = diff(Set({corte, penteado, manicure, depilacao, massagem}),{{}})
+
 clientes = {1..3}
 cabelereiros = {1..5}
 manicures = {1..3}
 depiladoras = {1..2}
 caixas = {1..2}
 massagistas = {1}
+preco = {1..10000}
+valor = {1..100000}
+faturamento = {0..10000}
+
+qtd_clientes = 3
 
 -----CANAIS
 
 channel corte_chan:clientes.cabelereiros
 channel penteado_chan:clientes.cabelereiros
-channel lavagem_chan:clientes.cabelereiros
-channel corte_pen_chan:clientes.cabelereiros
+channel lavagemC_chan:clientes.cabelereiros
+channel lavagemCP_chan:clientes.cabelereiros
 channel manicure_chan:clientes.manicures
 channel depilacao_chan:clientes.depiladoras
 channel massagem_chan:clientes.massagistas
-channel pagamento_chan:clientes.caixas
+channel pagamento_chan:clientes.caixas.preco
+
+channel fat_cabelereira_chan:clientes.cabelereiros.faturamento
+channel fat_manicure_chan:clientes.manicures.faturamento
+channel fat_depiladora_chan:clientes.depiladoras.faturamento
+channel fat_massagista_chan:clientes.massagistas.faturamento
+
+channel faturamento_chan:preco
+
+channel cliente_servicos:power_servicos
 
 -----DEFINICAO DOS FUNCIONARIOS
 
-CABELEREIRO(i) = corte_chan?x!i -> lavagem_chan!x!i -> CABELEREIRO(i)
-				[] penteado_chan?x!i -> CABELEREIRO(i)
-				[] corte_pen_chan?x!i -> penteado_chan!x!i -> lavagem_chan!x!i -> CABELEREIRO(i)
+CABELEREIRO(i, fat) = lavagemC_chan?x!i -> corte_chan!x!i -> fat_cabelereira_chan!x!i!(fat+30) -> CABELEREIRO(i, fat+30)
+			[] penteado_chan?x!i -> fat_cabelereira_chan!x!i!(fat+50) -> CABELEREIRO(i, fat+50)
+			[] lavagemCP_chan?x!i -> corte_chan!x!i -> penteado_chan!x!i -> fat_cabelereira_chan!x!i!(fat+40) -> CABELEREIRO(i, fat+40)
 
-MANICURE(i) = manicure_chan?x!i -> MANICURE(i)
+MANICURE(i, fat) = manicure_chan?x!i -> fat_manicure_chan!x!i!(fat+30) -> MANICURE(i, fat+30)
 
-DEPILADORA(i) = depilacao_chan?x!i -> DEPILADORA(i)
+DEPILADORA(i, fat) = depilacao_chan?x!i -> fat_depiladora_chan!x!i!(fat+40) -> DEPILADORA(i, fat+40)
 
-MASSAGISTA(i) = massagem_chan?x!i -> MASSAGISTA(i)
+MASSAGISTA(i, fat) = massagem_chan?x!i -> fat_massagista_chan!x!i!(fat+20) -> MASSAGISTA(i, fat+20)
 
-CAIXA(i) = pagamento_chan?x!i -> CAIXA(i)
+CAIXA(i) = pagamento_chan?x!i?y -> CAIXA(i)
 
 -----CRIACAO DOS FUNCIONARIOS
 
-CABELEREIROS = ||| i:cabelereiros @ CABELEREIRO(i)
+CABELEREIROS = ||| i:cabelereiros @ CABELEREIRO(i, 0)
 
-MANICURES = ||| i:manicures @ MANICURE(i)
+MANICURES = ||| i:manicures @ MANICURE(i, 0)
 
-DEPILADORAS = ||| i:depiladoras @ DEPILADORA(i)
+DEPILADORAS = ||| i:depiladoras @ DEPILADORA(i, 0)
 
-MASSAGISTAS = ||| i:massagistas @ MASSAGISTA(i)
+MASSAGISTAS = ||| i:massagistas @ MASSAGISTA(i, 0)
 
 CAIXAS = ||| i:caixas @ CAIXA(i)
 
@@ -52,62 +68,64 @@ FUNCIONARIOS = CABELEREIROS ||| MANICURES ||| DEPILADORAS ||| MASSAGISTAS ||| CA
 
 -----DEFINICAO DOS CLIENTES
 
-CLIENTE(id, servicos) =
+CLIENTE(id, servicos, total_pagar) =
 	member(corte, servicos) 
-		& corte_chan!id?x -> lavagem_chan!id!x -> CLIENTE(id, diff(servicos, {corte}))
+		& lavagemC_chan!id?x -> corte_chan!id!x -> CLIENTE(id, diff(servicos, {corte}), total_pagar + 30)
 	[]
 	member(penteado, servicos)
-		& penteado_chan!id?x -> CLIENTE(id, diff(servicos, {penteado}))
+		& penteado_chan!id?x -> CLIENTE(id, diff(servicos, {penteado}), total_pagar + 50)
 	[]
 	member(corte_penteado, servicos)
-		& corte_pen_chan!id?x -> penteado_chan!id!x -> lavagem_chan!id!x -> CLIENTE(id, diff({corte_penteado}))
+		& lavagemCP_chan!id?x -> corte_chan!id!x -> penteado_chan!id!x -> CLIENTE(id, diff(servicos, {corte_penteado}), total_pagar + 40)
 	[]
 	member(manicure, servicos)
-		& manicure_chan!id?x -> CLIENTE(id, diff(servicos, {manicure}))
+		& manicure_chan!id?x -> CLIENTE(id, diff(servicos, {manicure}), total_pagar + 30)
 	[]
 	member(depilacao, servicos)
-		& depilacao_chan!id?x -> CLIENTE(id, diff(servicos, {depilacao}))
+		& depilacao_chan!id?x -> CLIENTE(id, diff(servicos, {depilacao}), total_pagar + 40)
 	[]
 	member(massagem, servicos)
-		& massagem_chan!id?x -> CLIENTE(id, diff(servicos, {massagem}))
+		& massagem_chan!id?x -> CLIENTE(id, diff(servicos, {massagem}), total_pagar + 20)
 	[]
 	empty(servicos)
-		& pagamento_chan!id?x -> SKIP
+		& pagamento_chan!id?x!total_pagar -> SKIP
 
 
 -----CRIACAO DOS CLIENTES
 
-CLIENTE_PRE(id, servicos) = if (member(corte, servicos) and member(penteado,servicos))
-				then CLIENTE(id, union(diff(servicos, {corte, penteado}), {corte_penteado}))
-			    else
-				CLIENTE(id, servicos)
+RAND_SERV(T) = if empty(T)
+			then SKIP
+		else
+		|~| i:T @ cliente_servicos!i -> RAND_SERV(diff(T, {i}))
 
-CLIENTES = ||| i:clientes @ CLIENTE_PRE(i, {corte, penteado, massagem})
+CLIENTE_GENERATOR(i, id) = if i == 0
+				then SKIP
+			   else
+				cliente_servicos?x -> (CLIENTE_PRE(id, x) ||| CLIENTE_GENERATOR(i-1, id+1))
+
+CLIENTE_PRE(id, servicos) = if (member(corte, servicos) and member(penteado,servicos))
+				then CLIENTE(id, union(diff(servicos, {corte, penteado}), {corte_penteado}), 0)
+			    else
+				CLIENTE(id, servicos, 0)
+
+GENERATOR = RAND_SERV(power_servicos) [| {|cliente_servicos|} |] CLIENTE_GENERATOR(qtd_clientes,1)
+
+--CLIENTES = ||| i:clientes @ CLIENTE_PRE(i, {corte, penteado, massagem})
 
 -----CRIACAO DO SALAO
 
-SALAO = CLIENTES [| {|corte_chan, penteado_chan, lavagem_chan, corte_pen_chan, manicure_chan, depilacao_chan, massagem_chan, pagamento_chan|} |] FUNCIONARIOS
+SALAO = GENERATOR [| {|corte_chan, penteado_chan, lavagemC_chan, lavagemCP_chan, manicure_chan, depilacao_chan, massagem_chan, pagamento_chan|} |] FUNCIONARIOS
+
+SALAO_COM_FAT = SALAO [| {|pagamento_chan|} |] FATURAMENTO(0, qtd_clientes)
 
 assert SALAO:[deadlock free]
 
------TESTANDO RANDOM GENERATOR
+-----FATURAMENTO
 
-power = diff(Set({corte, penteado, manicure, depilacao, massagem}),{{}})
-
-channel in, out:power
-
-CHOOSE_NUM(T) = if empty(T)
-			then SKIP
-		else
-		|~| i:T @ in!i -> CHOOSE_NUM(diff(T, {i}))
-
-CHOOSEN_NUM= in?x -> OUT(x)
-		[] SKIP
-
-OUT(i) = out!i -> CHOOSEN_NUM
-
-RAND_NUM = CHOOSE_NUM(power) [| {|in|} |] CHOOSEN_NUM \ {|in|}
-
+FATURAMENTO(total, i) = if(i == 0)
+					then faturamento_chan!total -> STOP
+		    		   else 
+					pagamento_chan?id?x?total_pagar -> FATURAMENTO(total + total_pagar, i - 1)
 
 -----SEGMENTO COM ERRO
 
@@ -122,3 +140,57 @@ RAND_NUM = CHOOSE_NUM(power) [| {|in|} |] CHOOSEN_NUM \ {|in|}
 --SPEC = SPEC_1 [ {corte_chan.1.2, corte_chan.2.1, massagem_chan.2.1} || COMP ] RUN(COMP)
 
 --assert SPEC [T= SALAO
+
+-----NAO ORGANIZADO \ SALAO COM PORCENTAGEM
+
+channel trans:{1..100}
+
+SERV_CARD_STARTER = SERV_CARD(seq(power_servicos), <>, <>, <>, <>, <>)
+
+SERV_CARD(servicos, card1, card2, card3, card4, card5) = 
+	if (#servicos == 0)
+		then GERA_QTD_SERVICOS(set(card1), set(card2), set(card3), set(card4), set(card5))
+	else if card(head(servicos)) == 1
+		then SERV_CARD(tail(servicos), <head(servicos)>^card1, card2, card3, card4, card5)
+	else if card(head(servicos)) == 2
+		then SERV_CARD(tail(servicos), card1, <head(servicos)>^card2, card3, card4, card5)
+	else if card(head(servicos)) == 3
+		then SERV_CARD(tail(servicos), card1, card2, <head(servicos)>^card3, card4, card5)
+	else if card(head(servicos)) == 4
+		then SERV_CARD(tail(servicos), card1, card2,card3, <head(servicos)>^card4, card5)
+	else if card(head(servicos)) == 5
+		then SERV_CARD(tail(servicos), card1, card2, card3, card4, <head(servicos)>^card5)
+	else
+		STOP
+
+GERA_PERC_STARTER = GERA_PERC(qtd_clientes)
+
+GERA_PERC(i) = if (i == 0)
+			then STOP
+		else
+			|~| x:{1..100} @ trans!x -> GERA_PERC(i-1)
+
+GERA_QTD_SERVICOS(card1,card2,card3,card4,card5) =
+		trans?percentual ->(
+		if (percentual >= 1 and percentual <= 30)
+ 			then RAND_SERV2(card5)
+ 		else if (percentual >= 31 and percentual <= 65)
+			then RAND_SERV2(card4)
+ 		else if (percentual >= 66 and percentual <= 85) 
+			then RAND_SERV2(card3)
+ 		else if (percentual >= 86  and percentual<= 95)
+			then RAND_SERV2(card2)
+ 		else if (percentual >= 96 and percentual <= 100) 
+			then RAND_SERV2(card1)
+ 		else
+			STOP)
+
+RAND_SERV2(T) = |~| i:T @ cliente_servicos!i -> STOP
+
+SERV_CARDS = ||| x:{1..qtd_clientes} @ SERV_CARD_STARTER
+
+RAND_SERV_QTD = SERV_CARDS [| {|trans|} |] GERA_PERC_STARTER
+
+NEW_CLIENTE_GEN = RAND_SERV_QTD [| {|cliente_servicos|} |] CLIENTE_GENERATOR(qtd_clientes,1)
+
+SALAO_NEW = NEW_CLIENTE_GEN [| {|corte_chan, penteado_chan, lavagemC_chan, lavagemCP_chan, manicure_chan, depilacao_chan, massagem_chan, pagamento_chan|} |] FUNCIONARIOS
