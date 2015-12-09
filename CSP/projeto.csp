@@ -1,0 +1,124 @@
+-----CONSTANTES
+
+datatype services = corte | penteado | corte_penteado | manicure | depilacao | massagem | pagamento
+
+clientes = {1..3}
+cabelereiros = {1..5}
+manicures = {1..3}
+depiladoras = {1..2}
+caixas = {1..2}
+massagistas = {1}
+
+-----CANAIS
+
+channel corte_chan:clientes.cabelereiros
+channel penteado_chan:clientes.cabelereiros
+channel lavagem_chan:clientes.cabelereiros
+channel corte_pen_chan:clientes.cabelereiros
+channel manicure_chan:clientes.manicures
+channel depilacao_chan:clientes.depiladoras
+channel massagem_chan:clientes.massagistas
+channel pagamento_chan:clientes.caixas
+
+-----DEFINICAO DOS FUNCIONARIOS
+
+CABELEREIRO(i) = corte_chan?x!i -> lavagem_chan!x!i -> CABELEREIRO(i)
+				[] penteado_chan?x!i -> CABELEREIRO(i)
+				[] corte_pen_chan?x!i -> penteado_chan!x!i -> lavagem_chan!x!i -> CABELEREIRO(i)
+
+MANICURE(i) = manicure_chan?x!i -> MANICURE(i)
+
+DEPILADORA(i) = depilacao_chan?x!i -> DEPILADORA(i)
+
+MASSAGISTA(i) = massagem_chan?x!i -> MASSAGISTA(i)
+
+CAIXA(i) = pagamento_chan?x!i -> CAIXA(i)
+
+-----CRIACAO DOS FUNCIONARIOS
+
+CABELEREIROS = ||| i:cabelereiros @ CABELEREIRO(i)
+
+MANICURES = ||| i:manicures @ MANICURE(i)
+
+DEPILADORAS = ||| i:depiladoras @ DEPILADORA(i)
+
+MASSAGISTAS = ||| i:massagistas @ MASSAGISTA(i)
+
+CAIXAS = ||| i:caixas @ CAIXA(i)
+
+-----PARALELISMO DOS FUNCIONARIOS
+
+FUNCIONARIOS = CABELEREIROS ||| MANICURES ||| DEPILADORAS ||| MASSAGISTAS ||| CAIXAS
+
+-----DEFINICAO DOS CLIENTES
+
+CLIENTE(id, servicos) =
+	member(corte, servicos) 
+		& corte_chan!id?x -> lavagem_chan!id!x -> CLIENTE(id, diff(servicos, {corte}))
+	[]
+	member(penteado, servicos)
+		& penteado_chan!id?x -> CLIENTE(id, diff(servicos, {penteado}))
+	[]
+	member(corte_penteado, servicos)
+		& corte_pen_chan!id?x -> penteado_chan!id!x -> lavagem_chan!id!x -> CLIENTE(id, diff({corte_penteado}))
+	[]
+	member(manicure, servicos)
+		& manicure_chan!id?x -> CLIENTE(id, diff(servicos, {manicure}))
+	[]
+	member(depilacao, servicos)
+		& depilacao_chan!id?x -> CLIENTE(id, diff(servicos, {depilacao}))
+	[]
+	member(massagem, servicos)
+		& massagem_chan!id?x -> CLIENTE(id, diff(servicos, {massagem}))
+	[]
+	empty(servicos)
+		& pagamento_chan!id?x -> SKIP
+
+
+-----CRIACAO DOS CLIENTES
+
+CLIENTE_PRE(id, servicos) = if (member(corte, servicos) and member(penteado,servicos))
+				then CLIENTE(id, union(diff(servicos, {corte, penteado}), {corte_penteado}))
+			    else
+				CLIENTE(id, servicos)
+
+CLIENTES = ||| i:clientes @ CLIENTE_PRE(i, {corte, penteado, massagem})
+
+-----CRIACAO DO SALAO
+
+SALAO = CLIENTES [| {|corte_chan, penteado_chan, lavagem_chan, corte_pen_chan, manicure_chan, depilacao_chan, massagem_chan, pagamento_chan|} |] FUNCIONARIOS
+
+assert SALAO:[deadlock free]
+
+-----TESTANDO RANDOM GENERATOR
+
+power = diff(Set({corte, penteado, manicure, depilacao, massagem}),{{}})
+
+channel in, out:power
+
+CHOOSE_NUM(T) = if empty(T)
+			then SKIP
+		else
+		|~| i:T @ in!i -> CHOOSE_NUM(diff(T, {i}))
+
+CHOOSEN_NUM= in?x -> OUT(x)
+		[] SKIP
+
+OUT(i) = out!i -> CHOOSEN_NUM
+
+RAND_NUM = CHOOSE_NUM(power) [| {|in|} |] CHOOSEN_NUM \ {|in|}
+
+
+-----SEGMENTO COM ERRO
+
+--SALAO_ALF = {| corte_chan, manicure_chan, depilacao_chan, massagem_chan, pagamento_chan|}
+
+--RUN(A) = [] x:A @ x -> RUN(A)
+
+--COMP = diff(SALAO_ALF, {corte_chan.1.2, corte_chan.2.1, massagem_chan.2.1})
+
+--SPEC_1 = corte_chan.1.2 -> corte_chan.2.1 -> massagem_chan.2.1 -> STOP
+
+--SPEC = SPEC_1 [ {corte_chan.1.2, corte_chan.2.1, massagem_chan.2.1} || COMP ] RUN(COMP)
+
+--assert SPEC [T= SALAO
